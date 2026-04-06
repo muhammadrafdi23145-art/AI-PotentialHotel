@@ -118,29 +118,54 @@ if st.button("Cari Data Hotel", type="primary"):
             col2.metric("Memiliki No. Telepon", f"{len(hasil_df[hasil_df['Telepon'] != '-'])}")
             col3.metric("Memiliki Website", f"{len(hasil_df[hasil_df['Website'] != '-'])}")
             
-            # 2. Tampilkan Peta (Jika ada data koordinat)
-            df_map = hasil_df.dropna(subset=['lat', 'lon']).copy()
-            if not df_map.empty:
-                st.markdown("### Peta Persebaran Hotel")
-                st.map(df_map)
+            st.markdown("---")
             
-            # 3. Tampilkan Tabel Data
-            st.markdown("### Detail Data Leads")
-            # Sembunyikan kolom lat/lon di tabel agar rapi, tapi tetap ada di CSV
-            st.dataframe(hasil_df.drop(columns=['lat', 'lon']), use_container_width=True)
+            # Membuat Tab untuk Tabel dan Peta agar tidak kepanjangan ke bawah
+            tab_tabel, tab_peta = st.tabs(["📋 Tabel Data Leads", "🗺️ Peta Persebaran (Indonesia)"])
             
-            # Konversi data ke CSV
-            csv = hasil_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8')
-            
-            # Tombol Download
-            st.download_button(
-                label="📥 Download Full Data (CSV)",
-                data=csv,
-                file_name=f"Leads_Hotel_{target_kota.replace(' ', '_')}.csv",
-                mime="text/csv"
-            )
+            # ========================
+            # ISI TAB 1: TABEL DATA
+            # ========================
+            with tab_tabel:
+                # Sembunyikan kolom lat/lon di layar agar rapi
+                st.dataframe(hasil_df.drop(columns=['lat', 'lon']), use_container_width=True)
+                
+                # Konversi data ke CSV
+                csv = hasil_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8')
+                
+                # Tombol Download
+                st.download_button(
+                    label="📥 Download Full Data (CSV)",
+                    data=csv,
+                    file_name=f"Leads_Hotel_{target_kota.replace(' ', '_')}.csv",
+                    mime="text/csv"
+                )
+
+            # ========================
+            # ISI TAB 2: PETA (FOKUS INDONESIA)
+            # ========================
+            with tab_peta:
+                # Filter khusus koordinat yang valid dan masuk akal
+                df_map = hasil_df.dropna(subset=['lat', 'lon']).copy()
+                
+                # Pastikan format datanya angka (numeric)
+                df_map['lat'] = pd.to_numeric(df_map['lat'], errors='coerce')
+                df_map['lon'] = pd.to_numeric(df_map['lon'], errors='coerce')
+                df_map = df_map.dropna(subset=['lat', 'lon'])
+                
+                # Filter Bounding Box Indonesia (Lat: -11 s/d +6, Lon: 95 s/d 141)
+                df_indo = df_map[
+                    (df_map['lat'] >= -11.0) & (df_map['lat'] <= 6.0) &
+                    (df_map['lon'] >= 95.0) & (df_map['lon'] <= 141.0)
+                ]
+                
+                if not df_indo.empty:
+                    st.map(df_indo)
+                else:
+                    st.warning("Tidak ada data hotel yang memiliki titik koordinat valid di peta.")
+
         else:
             if status == "Success":
-                st.error(f"Data tidak ditemukan untuk kota: '{target_kota}'. Pastikan penulisan kota benar (contoh: 'Kota Bandung' bukan sekadar 'Bandung').")
+                st.error(f"Data tidak ditemukan untuk kota: '{target_kota}'. Pastikan penulisan kota benar.")
             else:
                 st.error(status)
