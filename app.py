@@ -14,7 +14,7 @@ def cari_hotel_osm(kota):
     
     overpass_query = f"""
     [out:json][timeout:90];
-    area[name~"(?i)^{kota}$"]->.searchArea; 
+    area[name~"^{kota}$", i]->.searchArea; 
     (
       node["tourism"="hotel"](area.searchArea);
       way["tourism"="hotel"](area.searchArea);
