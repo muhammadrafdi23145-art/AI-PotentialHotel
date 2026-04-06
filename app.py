@@ -1,20 +1,56 @@
 import streamlit as st
 import requests
 import pandas as pd
+import re
+import io
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+from bs4 import BeautifulSoup
 
 # Konfigurasi Tampilan Halaman
-st.set_page_config(page_title="Hotel Leads Scraper", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Hotel Leads Pro v3", layout="wide")
 
-st.title("Mesin Pencari Potensi Hotel")
-st.markdown("Masukkan nama kota untuk menarik data hotel beserta koordinatnya secara otomatis dari OpenStreetMap.")
+# Inisialisasi Geocoder (Opsi 2)
+geolocator = Nominatim(user_agent="hotel_leads_pro_v3")
+reverse_geocode = RateLimiter(geolocator.reverse, min_delay_seconds=1)
 
 # ==========================================
-# FUNGSI PENARIK DATA
+# FUNGSI PENDUKUNG (OPSI 3: SCRAPER)
+# ==========================================
+def scrape_contact_info(url):
+    """Mencoba mencari Email dan WA dari website hotel"""
+    if not url or url == "-":
+        return "-", "-"
+    
+    # Tambahkan http jika tidak ada
+    if not url.startswith('http'):
+        url = 'http://' + url
+
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        text = soup.get_text()
+
+        # Regex untuk Email
+        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        emails = re.findall(email_pattern, text)
+        found_email = emails[0] if emails else "-"
+
+        # Regex sederhana untuk potensi nomor WA (Indo: 08... atau 628...)
+        wa_pattern = r'(\+62|62|0)8[1-9][0-9]{7,10}'
+        was = re.findall(wa_pattern, text)
+        found_wa = was[0] if was else "-"
+
+        return found_email, found_wa
+    except:
+        return "-", "-"
+
+# ==========================================
+# FUNGSI UTAMA PENARIK DATA (OSM)
 # ==========================================
 def cari_hotel_osm(kota):
     overpass_url = "http://overpass-api.de/api/interpreter"
-    
-    # Timeout ditingkatkan menjadi 180 detik untuk mencegah gagal di area luas
     overpass_query = f"""
     [out:json][timeout:180];
     area[name~"^{kota}$", i]->.searchArea; 
@@ -25,154 +61,113 @@ def cari_hotel_osm(kota):
     );
     out center;
     """
-    
-    headers = {
-        'User-Agent': 'HotelLeadsScraperBot/1.0 (Contact: your_email@example.com)' 
-    }
-    
     try:
-        # Timeout sistem Python ditingkatkan ke 200 detik
-        response = requests.get(overpass_url, params={'data': overpass_query}, headers=headers, timeout=200)
-        
-        # Handle Rate Limiting & Server Error
-        if response.status_code == 429:
-            return None, "Server Overpass sibuk (Too Many Requests). Silakan coba beberapa menit lagi."
-        elif response.status_code == 504:
-            return None, f"Gagal (Error 504): Area '{kota}' terlalu luas atau server sedang lambat. Saran: Coba gunakan nama daerah yang lebih spesifik/kecil (contoh: 'Kuta', 'Ubud' daripada 'Bali')."
-        elif response.status_code != 200:
+        response = requests.get(overpass_url, params={'data': overpass_query}, timeout=200)
+        if response.status_code != 200:
             return None, f"Error Server: {response.status_code}"
             
         data = response.json()
         daftar_hotel = []
-        
         for element in data.get('elements', []):
             tags = element.get('tags', {})
-            
             nama = tags.get('name', '-')
             if nama == '-': continue
-                
-            # Mengambil alamat yang lebih lengkap
+            
+            # Alamat dasar
             jalan = tags.get('addr:street', '')
             nomor = tags.get('addr:housenumber', '')
-            kode_pos = tags.get('addr:postcode', '')
-            alamat_full = tags.get('addr:full', '')
+            alamat_osm = f"{jalan} {nomor}".strip() or "-"
             
-            if alamat_full:
-                alamat_lengkap = alamat_full
-            else:
-                alamat_lengkap = f"{jalan} {nomor} {kode_pos}".strip()
-            
-            if not alamat_lengkap: alamat_lengkap = "-"
-                
-            telepon = tags.get('phone', tags.get('contact:phone', '-')) 
-            website = tags.get('website', tags.get('contact:website', '-'))
-            
-            # Normalisasi Bintang
-            bintang = tags.get('stars', '-')
-            if isinstance(bintang, str) and 'star' in bintang.lower():
-                 bintang = bintang.lower().replace('stars', '').replace('star', '').strip()
-            
-            # Ambil Latitude & Longitude
             lat = element.get('lat') or element.get('center', {}).get('lat')
             lon = element.get('lon') or element.get('center', {}).get('lon')
             
             daftar_hotel.append({
                 "Nama Hotel": nama,
-                "Kota": kota.upper(),
-                "Bintang": bintang,
-                "Alamat": alamat_lengkap,
-                "Telepon": telepon,
-                "Website": website,
-                "lat": lat,
-                "lon": lon
+                "Bintang": tags.get('stars', '-'),
+                "Alamat OSM": alamat_osm,
+                "Telepon": tags.get('phone', tags.get('contact:phone', '-')),
+                "Website": tags.get('website', '-'),
+                "lat": lat, "lon": lon
             })
-            
+        
         df = pd.DataFrame(daftar_hotel)
         if not df.empty:
-            # Hapus duplikat berdasarkan Nama DAN Koordinat (Menyelamatkan cabang hotel)
             df = df.drop_duplicates(subset=['Nama Hotel', 'lat', 'lon']).reset_index(drop=True)
-            
         return df, "Success"
-        
-    except requests.exceptions.Timeout:
-        return None, "Waktu pencarian habis (Timeout). Server tidak merespon. Coba area yang lebih kecil."
     except Exception as e:
-        return None, f"Terjadi kesalahan sistem: {str(e)}"
+        return None, str(e)
 
 # ==========================================
-# TAMPILAN USER INTERFACE (UI)
+# UI STREAMLIT
 # ==========================================
+st.title("🏨 Hotel Leads Scraper Ultra V3")
+st.markdown("Mesin pencari leads hotel dengan fitur **Auto-Address Fill** dan **Website Contact Scraper**.")
 
-st.markdown("---")
-# Kolom Input
-target_kota = st.text_input("Ketik Nama Kota (Contoh: Jakarta Selatan, Denpasar, Bandung):", placeholder="Ketik di sini...")
+# Sidebar Settings
+st.sidebar.header("🔧 Pengaturan Lead Gen")
+opsi_geocoding = st.sidebar.checkbox("Lengkapi Alamat (Reverse Geocoding)", value=False, help="Mengisi alamat otomatis jika data OSM kosong. Proses lebih lama.")
+opsi_scraping = st.sidebar.checkbox("Scrape Email/WA dari Website", value=False, help="Mencoba mengunjungi website hotel untuk cari kontak.")
 
-# Tombol Eksekusi
-if st.button("Cari Data Hotel", type="primary"):
-    if target_kota.strip() == "":
-        st.warning("Silakan ketik nama kota terlebih dahulu!")
-    else:
-        # Tambahan info di spinner agar user sabar menunggu jika areanya besar
-        with st.spinner(f"Mencari seluruh data hotel di {target_kota.upper()}... (Bisa memakan waktu hingga 3 menit untuk kota besar)"):
-            hasil_df, status = cari_hotel_osm(target_kota)
+target_kota = st.text_input("Ketik Nama Kota/Kabupaten:")
+
+if st.button("Mulai Tarik Data", type="primary"):
+    if target_kota:
+        with st.spinner(f"Tahap 1: Menarik data dasar dari {target_kota}..."):
+            df, status = cari_hotel_osm(target_kota)
         
-        if hasil_df is not None and not hasil_df.empty:
-            st.success(f"Berhasil menarik data dari {target_kota.upper()}!")
+        if df is not None and not df.empty:
             
-            # 1. Tampilkan Metrik Rangkuman
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Hotel Ditemukan", f"{len(hasil_df)} Properti")
-            col2.metric("Memiliki No. Telepon", f"{len(hasil_df[hasil_df['Telepon'] != '-'])}")
-            col3.metric("Memiliki Website", f"{len(hasil_df[hasil_df['Website'] != '-'])}")
-            
-            st.markdown("---")
-            
-            # Membuat Tab untuk Tabel dan Peta agar rapi
-            tab_tabel, tab_peta = st.tabs(["📋 Tabel Data Leads", "🗺️ Peta Persebaran (Indonesia)"])
-            
-            # ========================
-            # ISI TAB 1: TABEL DATA
-            # ========================
-            with tab_tabel:
-                # Sembunyikan kolom lat/lon di layar agar rapi
-                st.dataframe(hasil_df.drop(columns=['lat', 'lon']), use_container_width=True)
-                
-                # Konversi data ke CSV
-                csv = hasil_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8')
-                
-                # Tombol Download
-                st.download_button(
-                    label="📥 Download Full Data (CSV)",
-                    data=csv,
-                    file_name=f"Leads_Hotel_{target_kota.replace(' ', '_')}.csv",
-                    mime="text/csv"
-                )
+            # --- PROSES OPSI 2: REVERSE GEOCODING ---
+            if opsi_geocoding:
+                st.info("Tahap 2: Melengkapi alamat yang kosong via Koordinat...")
+                progress_bar = st.progress(0)
+                for i, row in df.iterrows():
+                    if row['Alamat OSM'] == "-":
+                        try:
+                            location = geolocator.reverse((row['lat'], row['lon']), timeout=3)
+                            if location:
+                                df.at[i, 'Alamat OSM'] = location.address
+                        except:
+                            continue
+                    progress_bar.progress((i + 1) / len(df))
 
-            # ========================
-            # ISI TAB 2: PETA (FOKUS INDONESIA)
-            # ========================
-            with tab_peta:
-                # Copy data map
-                df_map = hasil_df.dropna(subset=['lat', 'lon']).copy()
-                
-                # Pastikan format datanya angka (numeric)
-                df_map['lat'] = pd.to_numeric(df_map['lat'], errors='coerce')
-                df_map['lon'] = pd.to_numeric(df_map['lon'], errors='coerce')
-                df_map = df_map.dropna(subset=['lat', 'lon'])
-                
-                # Filter Bounding Box Indonesia (Lat: -11 s/d +6, Lon: 95 s/d 141)
-                df_indo = df_map[
-                    (df_map['lat'] >= -11.0) & (df_map['lat'] <= 6.0) &
-                    (df_map['lon'] >= 95.0) & (df_map['lon'] <= 141.0)
-                ]
-                
-                if not df_indo.empty:
-                    st.map(df_indo)
-                else:
-                    st.warning("Tidak ada data hotel yang memiliki titik koordinat valid di peta Indonesia.")
+            # --- PROSES OPSI 3: WEBSITE SCRAPING ---
+            if opsi_scraping:
+                st.info("Tahap 3: Mencari Email & WA di website hotel (Jika ada)...")
+                emails, whatsapps = [], []
+                progress_bar_web = st.progress(0)
+                for i, row in df.iterrows():
+                    email, wa = scrape_contact_info(row['Website'])
+                    emails.append(email)
+                    whatsapps.append(wa)
+                    progress_bar_web.progress((i + 1) / len(df))
+                df['Email (Scraped)'] = emails
+                df['WA (Scraped)'] = whatsapps
 
+            # --- TAMPILAN HASIL ---
+            st.success(f"Selesai! Ditemukan {len(df)} Leads.")
+            
+            tab1, tab2 = st.tabs(["📋 Data Leads", "🗺️ Peta Lokasi"])
+            
+            with tab1:
+                st.dataframe(df.drop(columns=['lat', 'lon']), use_container_width=True)
+                
+                # --- OPSI 4: EXPORT EXCEL & CSV ---
+                col_dl1, col_dl2 = st.columns(2)
+                
+                # CSV
+                csv = df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8')
+                col_dl1.download_button("📥 Download CSV", data=csv, file_name=f"Leads_{target_kota}.csv", mime="text/csv")
+                
+                # EXCEL (XLSX)
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Leads Hotel')
+                excel_data = output.getvalue()
+                col_dl2.download_button("📊 Download EXCEL (.xlsx)", data=excel_data, file_name=f"Leads_{target_kota}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            with tab2:
+                df_map = df.dropna(subset=['lat', 'lon'])
+                st.map(df_map)
         else:
-            if status == "Success":
-                st.error(f"Data tidak ditemukan untuk kota: '{target_kota}'. Pastikan penulisan kota benar (contoh: 'Kota Bandung' atau 'Bandung').")
-            else:
-                st.error(status)
+            st.error(f"Gagal: {status}")
