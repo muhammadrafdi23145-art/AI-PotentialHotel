@@ -5,7 +5,7 @@ import pandas as pd
 # Konfigurasi Tampilan Halaman
 st.set_page_config(page_title="Hotel Leads Scraper", layout="wide", initial_sidebar_state="expanded")
 
-st.title("🏨 Mesin Pencari Potensi Hotel")
+st.title("Mesin Pencari Potensi Hotel")
 st.markdown("Masukkan nama kota untuk menarik data hotel beserta koordinatnya secara otomatis dari OpenStreetMap.")
 
 # ==========================================
