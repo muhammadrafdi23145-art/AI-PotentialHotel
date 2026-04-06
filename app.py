@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 
 # Konfigurasi Tampilan Halaman
-st.set_page_config(page_title="Hotel Leads Scraper", page_icon="🏨", layout="wide")
+st.set_page_config(page_title="Hotel Leads Scraper", layout="wide")
 
 st.title("Mesin Pencari Prospek Hotel B2B")
 st.markdown("Masukkan nama kota untuk menarik data hotel (Nama, Alamat, Telepon, Bintang) secara otomatis.")
