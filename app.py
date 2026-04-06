@@ -5,20 +5,23 @@ import pandas as pd
 # Konfigurasi Tampilan Halaman
 st.set_page_config(page_title="Hotel Leads Scraper", layout="wide")
 
-st.title("Mesin Pencari Data Potensial Hotel")
-st.markdown("Masukkan nama kota untuk menarik data hotel (Nama, Alamat, Telepon, Bintang) secara otomatis.")
+st.title("Mesin Pencari Data Potensial Hotel Murni")
+st.markdown("Masukkan nama kota untuk menarik data khusus hotel (Nama, Alamat, Telepon, Bintang). Data Kost, Homestay, Villa, dan Guest House akan disaring otomatis.")
 
 # Fungsi Penarik Data
 def cari_hotel_osm(kota):
     overpass_url = "http://overpass-api.de/api/interpreter"
     
+    # FILTER NEGATIF: Kata-kata ini akan diabaikan dari hasil pencarian
+    kata_buang = "Kost|Kos |Homestay|Villa|Hostel|Guest House|Guesthouse|Apartment|Apartemen|Camp|Glamping|Penginapan"
+    
     overpass_query = f"""
     [out:json][timeout:90];
     area[name~"{kota}", i]->.searchArea;
     (
-      node["tourism"="hotel"](area.searchArea);
-      way["tourism"="hotel"](area.searchArea);
-      relation["tourism"="hotel"](area.searchArea);
+      node["tourism"="hotel"]["name"!~"{kata_buang}", i](area.searchArea);
+      way["tourism"="hotel"]["name"!~"{kata_buang}", i](area.searchArea);
+      relation["tourism"="hotel"]["name"!~"{kata_buang}", i](area.searchArea);
     );
     out center;
     """
@@ -40,6 +43,11 @@ def cari_hotel_osm(kota):
             
             nama = tags.get('name', '-')
             if nama == '-': continue
+                
+            # FILTER GANDA DI PYTHON: Untuk memastikan tidak ada data non-hotel yang lolos
+            nama_lower = nama.lower()
+            if any(kata in nama_lower for kata in ['kost', 'kos ', 'homestay', 'villa', 'hostel', 'guest house', 'guesthouse', 'penginapan', 'apartemen', 'apartment']):
+                continue
                 
             jalan = tags.get('addr:street', '')
             nomor = tags.get('addr:housenumber', '')
@@ -78,17 +86,17 @@ def cari_hotel_osm(kota):
 target_kota = st.text_input("Ketik Nama Kota (Contoh: Jakarta Selatan, Denpasar, Bandung):")
 
 # Tombol Eksekusi
-if st.button("🔍 Cari Data Hotel"):
+if st.button("Cari Data Hotel"):
     if target_kota.strip() == "":
         st.warning("Silakan ketik nama kota terlebih dahulu!")
     else:
-        # ANIMASI LOADING (Sistem akan menahan proses di sini sampai data selesai)
-        with st.spinner(f"Sedang menarik seluruh data hotel di area {target_kota.upper()}... Mohon tunggu sampai selesai."):
+        # ANIMASI LOADING
+        with st.spinner(f"Sedang menarik dan menyaring data hotel murni di area {target_kota.upper()}... Mohon tunggu sampai selesai."):
             hasil_df = cari_hotel_osm(target_kota)
         
         # PROSES SETELAH LOADING SELESAI
         if hasil_df is not None and not hasil_df.empty:
-            st.success(f"BERHASIL! Menemukan {len(hasil_df)} prospek hotel.")
+            st.success(f"BERHASIL! Menemukan {len(hasil_df)} prospek hotel (non-villa/homestay).")
             
             # Tampilkan Tabel
             st.dataframe(hasil_df, use_container_width=True)
@@ -96,11 +104,11 @@ if st.button("🔍 Cari Data Hotel"):
             # Konversi data ke CSV untuk di-download
             csv = hasil_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8')
             
-            # TOMBOL DOWNLOAD HANYA MUNCUL DI SINI (Setelah semua proses di atas selesai)
+            # TOMBOL DOWNLOAD
             st.download_button(
                 label="Download Data (CSV / Excel)",
                 data=csv,
-                file_name=f"Prospek_Hotel_{target_kota.replace(' ', '_')}.csv",
+                file_name=f"Prospek_Hotel_Murni_{target_kota.replace(' ', '_')}.csv",
                 mime="text/csv"
             )
         else:
