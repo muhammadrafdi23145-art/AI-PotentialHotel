@@ -8,12 +8,15 @@ st.set_page_config(page_title="Hotel Leads Scraper", layout="wide", initial_side
 st.title("🏨 Mesin Pencari Potensi Hotel")
 st.markdown("Masukkan nama kota untuk menarik data hotel beserta koordinatnya secara otomatis dari OpenStreetMap.")
 
-# Fungsi Penarik Data
+# ==========================================
+# FUNGSI PENARIK DATA
+# ==========================================
 def cari_hotel_osm(kota):
     overpass_url = "http://overpass-api.de/api/interpreter"
     
+    # Timeout ditingkatkan menjadi 180 detik untuk mencegah gagal di area luas
     overpass_query = f"""
-    [out:json][timeout:90];
+    [out:json][timeout:180];
     area[name~"^{kota}$", i]->.searchArea; 
     (
       node["tourism"="hotel"](area.searchArea);
@@ -24,15 +27,18 @@ def cari_hotel_osm(kota):
     """
     
     headers = {
-        'User-Agent': 'HotelLeadsScraperBot/1.0 (Contact: your_email@example.com)' # Etika scraping: berikan user-agent yang jelas
+        'User-Agent': 'HotelLeadsScraperBot/1.0 (Contact: your_email@example.com)' 
     }
     
     try:
-        response = requests.get(overpass_url, params={'data': overpass_query}, headers=headers, timeout=95)
+        # Timeout sistem Python ditingkatkan ke 200 detik
+        response = requests.get(overpass_url, params={'data': overpass_query}, headers=headers, timeout=200)
         
-        # Handle Rate Limiting dari Overpass
+        # Handle Rate Limiting & Server Error
         if response.status_code == 429:
             return None, "Server Overpass sibuk (Too Many Requests). Silakan coba beberapa menit lagi."
+        elif response.status_code == 504:
+            return None, f"Gagal (Error 504): Area '{kota}' terlalu luas atau server sedang lambat. Saran: Coba gunakan nama daerah yang lebih spesifik/kecil (contoh: 'Kuta', 'Ubud' daripada 'Bali')."
         elif response.status_code != 200:
             return None, f"Error Server: {response.status_code}"
             
@@ -58,7 +64,7 @@ def cari_hotel_osm(kota):
             
             if not alamat_lengkap: alamat_lengkap = "-"
                 
-            telepon = tags.get('phone', tags.get('contact:phone', '-')) # Cek juga contact:phone
+            telepon = tags.get('phone', tags.get('contact:phone', '-')) 
             website = tags.get('website', tags.get('contact:website', '-'))
             
             # Normalisasi Bintang
@@ -66,7 +72,7 @@ def cari_hotel_osm(kota):
             if isinstance(bintang, str) and 'star' in bintang.lower():
                  bintang = bintang.lower().replace('stars', '').replace('star', '').strip()
             
-            # Ambil Latitude & Longitude (PENTING)
+            # Ambil Latitude & Longitude
             lat = element.get('lat') or element.get('center', {}).get('lat')
             lon = element.get('lon') or element.get('center', {}).get('lon')
             
@@ -89,7 +95,7 @@ def cari_hotel_osm(kota):
         return df, "Success"
         
     except requests.exceptions.Timeout:
-        return None, "Pencarian terlalu lama (Timeout). Coba kota yang lebih spesifik."
+        return None, "Waktu pencarian habis (Timeout). Server tidak merespon. Coba area yang lebih kecil."
     except Exception as e:
         return None, f"Terjadi kesalahan sistem: {str(e)}"
 
@@ -106,7 +112,8 @@ if st.button("Cari Data Hotel", type="primary"):
     if target_kota.strip() == "":
         st.warning("Silakan ketik nama kota terlebih dahulu!")
     else:
-        with st.spinner(f"Mencari seluruh data hotel di {target_kota.upper()}..."):
+        # Tambahan info di spinner agar user sabar menunggu jika areanya besar
+        with st.spinner(f"Mencari seluruh data hotel di {target_kota.upper()}... (Bisa memakan waktu hingga 3 menit untuk kota besar)"):
             hasil_df, status = cari_hotel_osm(target_kota)
         
         if hasil_df is not None and not hasil_df.empty:
@@ -120,7 +127,7 @@ if st.button("Cari Data Hotel", type="primary"):
             
             st.markdown("---")
             
-            # Membuat Tab untuk Tabel dan Peta agar tidak kepanjangan ke bawah
+            # Membuat Tab untuk Tabel dan Peta agar rapi
             tab_tabel, tab_peta = st.tabs(["📋 Tabel Data Leads", "🗺️ Peta Persebaran (Indonesia)"])
             
             # ========================
@@ -145,7 +152,7 @@ if st.button("Cari Data Hotel", type="primary"):
             # ISI TAB 2: PETA (FOKUS INDONESIA)
             # ========================
             with tab_peta:
-                # Filter khusus koordinat yang valid dan masuk akal
+                # Copy data map
                 df_map = hasil_df.dropna(subset=['lat', 'lon']).copy()
                 
                 # Pastikan format datanya angka (numeric)
@@ -162,10 +169,10 @@ if st.button("Cari Data Hotel", type="primary"):
                 if not df_indo.empty:
                     st.map(df_indo)
                 else:
-                    st.warning("Tidak ada data hotel yang memiliki titik koordinat valid di peta.")
+                    st.warning("Tidak ada data hotel yang memiliki titik koordinat valid di peta Indonesia.")
 
         else:
             if status == "Success":
-                st.error(f"Data tidak ditemukan untuk kota: '{target_kota}'. Pastikan penulisan kota benar.")
+                st.error(f"Data tidak ditemukan untuk kota: '{target_kota}'. Pastikan penulisan kota benar (contoh: 'Kota Bandung' atau 'Bandung').")
             else:
                 st.error(status)
