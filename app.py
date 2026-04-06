@@ -5,7 +5,7 @@ import pandas as pd
 # Konfigurasi Tampilan Halaman
 st.set_page_config(page_title="Hotel Leads Scraper", layout="wide")
 
-st.title("Mesin Pencari Prospek Hotel B2B")
+st.title("Mesin Pencari Potensi Hotel")
 st.markdown("Masukkan nama kota untuk menarik data hotel (Nama, Alamat, Telepon, Bintang) secara otomatis.")
 
 # Fungsi Penarik Data
@@ -78,7 +78,7 @@ def cari_hotel_osm(kota):
 target_kota = st.text_input("Ketik Nama Kota (Contoh: Jakarta Selatan, Denpasar, Bandung):")
 
 # Tombol Eksekusi
-if st.button("🔍 Cari Data Hotel"):
+if st.button("Cari Data Hotel"):
     if target_kota.strip() == "":
         st.warning("Silakan ketik nama kota terlebih dahulu!")
     else:
@@ -88,7 +88,7 @@ if st.button("🔍 Cari Data Hotel"):
         
         # PROSES SETELAH LOADING SELESAI
         if hasil_df is not None and not hasil_df.empty:
-            st.success(f"🎉 BERHASIL! Menemukan {len(hasil_df)} prospek hotel.")
+            st.success(f"BERHASIL! Menemukan {len(hasil_df)} potensi hotel.")
             
             # Tampilkan Tabel
             st.dataframe(hasil_df, use_container_width=True)
